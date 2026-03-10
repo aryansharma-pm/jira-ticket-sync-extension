@@ -7,18 +7,18 @@
 export const CONFIG = {
   // ─── Google OAuth ───────────────────────────────────────────────────────────
   // Must match the client ID in manifest.json -> oauth2.client_id
-  OAUTH_CLIENT_ID: "182233530044-h7k4mcod7munop1tvbas6l8e3u536toq.apps.googleusercontent.com",
+  OAUTH_CLIENT_ID: "1822*****0044-h7k4********as6l8e3u536toq.apps.googleusercontent.com",
 
   // ─── Google Sheets ──────────────────────────────────────────────────────────
   // The spreadsheet where Jira ticket data will be written
-  SPREADSHEET_ID: "1fQLU987LszlOdZE6oLHYhaITnWZBbw_7cWDRiLcNB7A",
+  SPREADSHEET_ID: "1fQLU987Ls********YhaITnWZBbw_7cWDRiLcNB7A",
 
   // Name of the sheet (tab) inside the spreadsheet
   SHEET_NAME: "Jira Tickets",
 
   // ─── Jira ───────────────────────────────────────────────────────────────────
   // Base URL of your Jira instance (no trailing slash)
-  JIRA_BASE_URL: "https://gofynd.atlassian.net",
+  JIRA_BASE_URL: "https://abcd.atlassian.net",
 
   // Regex to identify Jira ticket numbers (e.g., ABC-1234, PROJ-99)
   // Adjust the project-key prefix range if needed
