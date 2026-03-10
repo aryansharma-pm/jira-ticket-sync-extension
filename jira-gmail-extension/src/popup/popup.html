@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Jira Gmail Tracker</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-brand">
+        <img src="../../icons/icon32.png" alt="logo" class="logo" />
+        <div class="brand-copy">
+          <p class="kicker">Gmail + Jira</p>
+          <h1 class="title">Ticket Sync Console</h1>
+          <p class="subtitle" id="userEmail">Not signed in</p>
+        </div>
+      </div>
+      <button id="btnSignOut" class="btn-icon" title="Sign Out" hidden>Sign out</button>
+    </header>
+
+    <section class="hero">
+      <p class="hero-label">Sync Status</p>
+      <div class="status-card">
+        <div class="status-indicator" id="statusDot"></div>
+        <p class="status-text" id="statusText">Ready to sync</p>
+      </div>
+      <div class="last-sync">
+        <span class="label">Last successful sync</span>
+        <span id="lastSyncTime">-</span>
+      </div>
+      <div class="last-sync">
+        <span class="label">Tickets added in last sync</span>
+        <span id="lastSyncTicketCount">-</span>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button id="btnSync" class="btn btn-primary">
+        <span class="btn-icon-left">Sync</span>
+        Run now
+      </button>
+      <button id="btnOpenSheet" class="btn btn-secondary">Open sheet</button>
+    </section>
+
+    <div class="progress-wrapper" id="progressWrapper" hidden>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <p class="progress-label" id="progressLabel">Initializing...</p>
+    </div>
+
+    <details class="settings-panel">
+      <summary class="settings-toggle">Configuration</summary>
+      <div class="settings-body">
+        <label class="field">
+          <span>Spreadsheet ID</span>
+          <input type="text" id="spreadsheetId" placeholder="1BxiM..." />
+        </label>
+        <label class="field">
+          <span>Sheet Name</span>
+          <input type="text" id="sheetName" placeholder="Jira Tickets" />
+        </label>
+        <label class="field">
+          <span>Jira Base URL</span>
+          <input type="url" id="jiraBaseUrl" placeholder="https://yourcompany.atlassian.net" />
+        </label>
+        <label class="field">
+          <span>Gmail Query</span>
+          <input type="text" id="gmailQuery" placeholder="newer_than:30d" />
+        </label>
+        <label class="field">
+          <span>Auto-sync Interval (minutes, 0 disables)</span>
+          <input type="number" id="autoSyncInterval" min="0" max="1440" />
+        </label>
+
+        <div class="settings-actions">
+          <button id="btnSaveSettings" class="btn btn-primary btn-sm">Save settings</button>
+          <button id="btnClearCache" class="btn btn-danger btn-sm">Clear seen cache</button>
+        </div>
+      </div>
+    </details>
+
+    <footer class="footer">
+      Jira Gmail Tracker v1.0
+    </footer>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
