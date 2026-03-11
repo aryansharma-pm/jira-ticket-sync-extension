@@ -30,8 +30,9 @@ A production-ready Chrome Extension (Manifest V3) that scans your Gmail inbox fo
 4. Each email is fetched, parsed, and scanned for `PROJ-123` style patterns
 5. Only emails where the user is in To/CC (or mentioned in body) are kept
 6. Duplicate ticket numbers are filtered (local cache + sheet column A)
-7. New rows are batch-appended to Google Sheets
-8. Progress is broadcast to the open popup (if any)
+7. Optional AI summaries are generated per ticket and as a sync-level rollup
+8. New rows are batch-appended to Google Sheets
+9. Progress is broadcast to the open popup (if any)
 
 ---
 
@@ -143,7 +144,19 @@ https://docs.google.com/spreadsheets/d/SPREADSHEET_ID_IS_HERE/edit
 | E      | Jira Link          | Direct link to the Jira issue        |
 | F      | Gmail Link         | Deep-link to the email in Gmail      |
 | G      | From               | Sender of the email                  |
-| H      | Synced At          | Timestamp when the row was written   |
+| H      | AI Ticket Summary  | Optional OpenAI-generated summary    |
+| I      | Synced At          | Timestamp when the row was written   |
+
+If AI summaries are enabled, a second sheet tab is also maintained:
+
+| Column | Header                 | Description                                  |
+|--------|------------------------|----------------------------------------------|
+| A      | Sync Timestamp         | Timestamp of the sync run                     |
+| B      | Ticket Count           | Number of newly added tickets in that sync    |
+| C      | Ticket Numbers         | Comma-separated list of ticket keys           |
+| D      | Consolidated Summary   | Rollup across all newly added tickets         |
+| E      | Action Items           | Suggested next actions from the rollup        |
+| F      | Synced At              | Timestamp when the rollup row was written     |
 
 ---
 
@@ -169,16 +182,19 @@ https://docs.google.com/spreadsheets/d/SPREADSHEET_ID_IS_HERE/edit
 | `SHEET_NAME`                | `"Jira Tickets"`     | Tab name inside the spreadsheet      |
 | `JIRA_BASE_URL`             | _(required)_         | e.g., `https://acme.atlassian.net`   |
 | `JIRA_TICKET_REGEX`         | `/\b([A-Z][A-Z0-9]+-\d+)\b/g` | Matches ticket numbers    |
-| `GMAIL_SEARCH_QUERY`        | `"newer_than:30d"`   | Gmail search filter                  |
+| `GMAIL_DATE_PRESET`         | `"last_30"`          | Date-range preset for Gmail sync     |
 | `MAX_RESULTS_PER_PAGE`      | `100`                | Messages per API page                |
 | `MAX_TOTAL_EMAILS`          | `1000`               | Hard cap per sync run                |
 | `AUTO_SYNC_INTERVAL_MINUTES`| `30`                 | 0 = disabled                         |
+| `ENABLE_AI_SUMMARIES`       | `false`              | Enable OpenAI summarization          |
+| `OPENAI_MODEL`              | `"gpt-4.1-mini"`     | OpenAI model used for summaries      |
+| `CONSOLIDATED_SHEET_NAME`   | `"Ticket Insights"`  | Sheet tab for sync-level rollups     |
 
 ---
 
 ## Performance Tips
 
-- **Narrow the Gmail query** — add `label:inbox` or sender filters to reduce emails scanned.
+- Use shorter date ranges (`last_30` vs `last_120`) for faster scans.
 - **Increase `MAX_RESULTS_PER_PAGE`** to 500 to reduce API round-trips (Gmail max).
 - **The seen-cache** (chrome.storage) avoids re-fetching email content for tickets already synced.
 - **Batch writes** — all new rows are written in a single `values:append` call.
@@ -199,7 +215,7 @@ https://docs.google.com/spreadsheets/d/SPREADSHEET_ID_IS_HERE/edit
 |--------------------------------|-----------------------------------------------------------------|
 | "Not signed in" / no prompt    | Check Client ID in manifest.json matches Cloud Console exactly  |
 | Empty sheet after sync         | Verify Spreadsheet ID and that the Sheet API is enabled         |
-| No tickets found               | Broaden `GMAIL_SEARCH_QUERY` or check your Jira regex           |
+| No tickets found               | Try a wider date range preset or verify custom date boundaries  |
 | Duplicate rows appear          | Click "Clear Seen Cache" — the sheet dedup check will still apply|
 | 401 errors in logs             | Revoke & re-grant OAuth consent via btnSignOut                  |
 

@@ -7,32 +7,85 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <div class="app">
+  <section class="auth-shell" id="authShell" hidden>
+    <div class="auth-card">
+      <img src="../../icons/fynd-logo-white.svg" alt="Jira Gmail Tracker logo" class="auth-logo" />
+      <p class="auth-kicker">Jira Gmail Tracker</p>
+      <h1 class="auth-title">Welcome Back</h1>
+      <p class="auth-subtitle">Sign in with Google to sync Jira tickets from Gmail to your report sheets.</p>
+      <button id="btnGoogleSignIn" class="btn btn-primary auth-btn">Continue with Google</button>
+      <button id="btnContinueGuest" class="btn btn-secondary auth-btn">Continue without sign-in</button>
+      <button id="btnCreateGoogle" class="btn btn-secondary auth-btn">Create Google account</button>
+    </div>
+  </section>
+
+  <div class="app" id="appShell">
     <header class="header">
       <div class="header-brand">
-        <img src="../../icons/icon32.png" alt="logo" class="logo" />
+        <img src="../../icons/fynd-logo-white.svg" alt="logo" class="logo" />
         <div class="brand-copy">
           <p class="kicker">Gmail + Jira</p>
           <h1 class="title">Ticket Sync Console</h1>
           <p class="subtitle" id="userEmail">Not signed in</p>
         </div>
       </div>
-      <button id="btnSignOut" class="btn-icon" title="Sign Out" hidden>Sign out</button>
     </header>
 
     <section class="hero">
       <p class="hero-label">Sync Status</p>
       <div class="status-card">
         <div class="status-indicator" id="statusDot"></div>
-        <p class="status-text" id="statusText">Ready to sync</p>
+        <div class="status-copy">
+          <p class="status-text" id="statusText">Ready to sync</p>
+          <p class="status-meta" id="dailyReportState">Daily report: enabled</p>
+        </div>
       </div>
-      <div class="last-sync">
-        <span class="label">Last successful sync</span>
-        <span id="lastSyncTime">-</span>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-label">Last successful sync</span>
+          <span class="metric-value" id="lastSyncTime">-</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Tickets in last scan</span>
+          <span class="metric-value" id="lastSyncTicketCount">-</span>
+        </div>
+        <div class="metric-card metric-card-wide">
+          <span class="metric-label">Next scheduled report</span>
+          <span class="metric-value" id="nextReportRun">-</span>
+        </div>
       </div>
-      <div class="last-sync">
-        <span class="label">Tickets added in last sync</span>
-        <span id="lastSyncTicketCount">-</span>
+    </section>
+
+    <section class="setup-card" id="setupCard">
+      <div class="setup-head">
+        <p class="setup-label">Setup Checklist</p>
+        <span class="setup-progress" id="setupProgress">0/5 complete</span>
+      </div>
+      <ul class="setup-list">
+        <li class="setup-item" id="setupAuthItem">
+          <span class="setup-dot"></span>
+          <span id="setupAuthText">Google account connected</span>
+        </li>
+        <li class="setup-item" id="setupSheetItem">
+          <span class="setup-dot"></span>
+          <span id="setupSheetText">Spreadsheet ID configured</span>
+        </li>
+        <li class="setup-item" id="setupJiraItem">
+          <span class="setup-dot"></span>
+          <span id="setupJiraText">Jira base URL configured</span>
+        </li>
+        <li class="setup-item" id="setupReportItem">
+          <span class="setup-dot"></span>
+          <span id="setupReportText">Daily report email configured (if enabled)</span>
+        </li>
+        <li class="setup-item" id="setupAiItem">
+          <span class="setup-dot"></span>
+          <span id="setupAiText">AI key configured (if AI enabled)</span>
+        </li>
+      </ul>
+      <div class="setup-actions">
+        <button id="btnOpenConfig" class="btn btn-secondary btn-sm btn-span-2">Open configuration</button>
       </div>
     </section>
 
@@ -41,7 +94,9 @@
         <span class="btn-icon-left">Sync</span>
         Run now
       </button>
-      <button id="btnOpenSheet" class="btn btn-secondary">Open sheet</button>
+      <button id="btnStopSync" class="btn btn-danger" disabled>Stop sync</button>
+      <button id="btnOpenSheet" class="btn btn-secondary btn-span-2">Open sheet</button>
+      <button id="btnSendTestReport" class="btn btn-secondary btn-span-2">Send test report</button>
     </section>
 
     <div class="progress-wrapper" id="progressWrapper" hidden>
@@ -51,7 +106,7 @@
       <p class="progress-label" id="progressLabel">Initializing...</p>
     </div>
 
-    <details class="settings-panel">
+    <details class="settings-panel" id="settingsPanel">
       <summary class="settings-toggle">Configuration</summary>
       <div class="settings-body">
         <label class="field">
@@ -67,23 +122,112 @@
           <input type="url" id="jiraBaseUrl" placeholder="https://yourcompany.atlassian.net" />
         </label>
         <label class="field">
-          <span>Gmail Query</span>
-          <input type="text" id="gmailQuery" placeholder="newer_than:30d" />
+          <span>Date Range</span>
+          <select id="gmailDatePreset">
+            <option value="last_30">Latest 30 days (today + last 29 days)</option>
+            <option value="prev_30">Last month 30 days (previous 30-day window)</option>
+            <option value="last_60">Last 60 days</option>
+            <option value="last_90">Last 90 days</option>
+            <option value="last_120">Last 120 days</option>
+            <option value="custom">Custom date range</option>
+          </select>
+        </label>
+        <div class="field-grid">
+          <label class="field">
+            <span>From Date</span>
+            <input type="date" id="gmailFromDate" />
+          </label>
+          <label class="field">
+            <span>To Date</span>
+            <input type="date" id="gmailToDate" />
+          </label>
+        </div>
+        <p class="field-help">
+          For <b>Custom date range</b>, only From/To dates are used. Preset ranges are ignored.
+        </p>
+        <p class="field-help">
+          Non-custom presets auto-calculate date boundaries and include today where applicable.
+        </p>
+        <label class="field field-checkbox">
+          <span>Fast mode (faster, may miss mention-only tickets)</span>
+          <input type="checkbox" id="fastModeEnabled" />
+        </label>
+        <label class="field">
+          <span>Max emails per sync</span>
+          <input type="number" id="maxTotalEmails" min="100" max="20000" step="100" />
         </label>
         <label class="field">
           <span>Auto-sync Interval (minutes, 0 disables)</span>
           <input type="number" id="autoSyncInterval" min="0" max="1440" />
         </label>
+        <label class="field field-checkbox">
+          <span>Enable daily 9:30 AM email report</span>
+          <input type="checkbox" id="dailyReportEnabled" />
+        </label>
+        <label class="field">
+          <span>Daily report time (24h)</span>
+          <input type="time" id="dailyReportTime" />
+        </label>
+        <label class="field">
+          <span>Report recipient email</span>
+          <input type="email" id="reportRecipientEmail" placeholder="you@company.com" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable AI summaries</span>
+          <input type="checkbox" id="enableAiSummaries" />
+        </label>
+        <label class="field">
+          <span>AI Provider</span>
+          <select id="aiProvider">
+            <option value="basic">Basic (No API key)</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>AI Summary Mode</span>
+          <select id="aiSummaryMode">
+            <option value="full">Per-ticket + Consolidated</option>
+            <option value="consolidated_only">Consolidated only (faster + cheaper)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>OpenAI API Key</span>
+          <input type="password" id="openAiApiKey" placeholder="sk-..." />
+        </label>
+        <label class="field">
+          <span>OpenAI Model</span>
+          <input type="text" id="openAiModel" placeholder="gpt-4.1-mini" />
+        </label>
+        <label class="field">
+          <span>Gemini API Key</span>
+          <input type="password" id="geminiApiKey" placeholder="AIza..." />
+        </label>
+        <label class="field">
+          <span>Gemini Model</span>
+          <input type="text" id="geminiModel" placeholder="gemini-2.0-flash" />
+        </label>
+        <label class="field">
+          <span>Consolidated AI Sheet Name</span>
+          <input type="text" id="consolidatedSheetName" placeholder="Ticket Insights" />
+        </label>
+        <p class="field-help">
+          When enabled, each synced ticket gets a summary column and each sync appends a rollup report into the consolidated sheet. Basic mode uses local rule-based summarization and needs no API key.
+        </p>
 
         <div class="settings-actions">
           <button id="btnSaveSettings" class="btn btn-primary btn-sm">Save settings</button>
           <button id="btnClearCache" class="btn btn-danger btn-sm">Clear seen cache</button>
+          <button id="btnResetStats" class="btn btn-secondary btn-sm btn-span-2">Reset sync stats</button>
         </div>
       </div>
     </details>
 
     <footer class="footer">
-      Jira Gmail Tracker v1.0
+      <div class="footer-actions">
+        <span>Jira Gmail Tracker v1.0</span>
+        <button id="btnSignOut" class="btn-icon btn-logout" title="Sign Out">Logout</button>
+      </div>
     </footer>
   </div>
 

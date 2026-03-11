@@ -44,8 +44,10 @@ export function containsTicket(text) {
  * @param {string} ticketNumber - e.g. "ABC-1234"
  * @returns {string} Full URL to the Jira issue
  */
-export function buildJiraUrl(ticketNumber) {
-  return `${CONFIG.JIRA_BASE_URL}/browse/${ticketNumber}`;
+export function buildJiraUrl(ticketNumber, jiraBaseUrl = CONFIG.JIRA_BASE_URL) {
+  const baseUrl = (jiraBaseUrl || "").trim().replace(/\/+$/, "");
+  if (!baseUrl) return "";
+  return `${baseUrl}/browse/${ticketNumber}`;
 }
 
 /**
