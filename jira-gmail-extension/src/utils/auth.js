@@ -4,12 +4,16 @@
  * Provides functions to get, refresh, and revoke tokens.
  */
 
-import { CONFIG } from "../config.js";
-
 /**
  * Request an OAuth2 access token interactively (shows consent screen if needed).
  * @returns {Promise<string>} Access token
  */
+let authRefreshInteractiveDefault = false;
+
+export function setAuthRefreshInteractive(enabled) {
+  authRefreshInteractiveDefault = Boolean(enabled);
+}
+
 export async function getAuthToken(interactive = true) {
   return new Promise((resolve, reject) => {
     chrome.identity.getAuthToken({ interactive }, (token) => {
@@ -75,13 +79,17 @@ export async function getUserEmail(token) {
  * @returns {Promise<Response>}
  */
 export async function authenticatedFetch(url, options = {}) {
+  const {
+    authInteractiveOnRefresh = authRefreshInteractiveDefault,
+    ...fetchOptions
+  } = options;
   let token = await getAuthToken(false);
 
   const makeRequest = (t) =>
     fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers: {
-        ...options.headers,
+        ...fetchOptions.headers,
         Authorization: `Bearer ${t}`,
       },
     });
@@ -93,8 +101,24 @@ export async function authenticatedFetch(url, options = {}) {
     await new Promise((resolve) =>
       chrome.identity.removeCachedAuthToken({ token }, resolve)
     );
-    token = await getAuthToken(true);
-    response = await makeRequest(token);
+    try {
+      token = await getAuthToken(false);
+      response = await makeRequest(token);
+    } catch {
+      if (!authInteractiveOnRefresh) {
+        return response;
+      }
+      try {
+        token = await getAuthToken(true);
+        response = await makeRequest(token);
+      } catch {
+        return response;
+      }
+    }
+    if (!response.ok && response.status === 401) {
+      // Keep original 401 response when refresh is not possible in this context.
+      return response;
+    }
   }
 
   return response;

@@ -17,6 +17,26 @@ export function storageSet(items) {
   return new Promise((resolve) => chrome.storage.local.set(items, resolve));
 }
 
+export function storageSessionGet(keys) {
+  return new Promise((resolve) => {
+    if (!chrome.storage.session) {
+      resolve({});
+      return;
+    }
+    chrome.storage.session.get(keys, resolve);
+  });
+}
+
+export function storageSessionSet(items) {
+  return new Promise((resolve) => {
+    if (!chrome.storage.session) {
+      resolve();
+      return;
+    }
+    chrome.storage.session.set(items, resolve);
+  });
+}
+
 // ─── Seen Ticket IDs ─────────────────────────────────────────────────────────
 
 /**
@@ -57,6 +77,34 @@ export async function getLastSyncTime() {
   return result[KEYS.LAST_SYNC_TIME] || null;
 }
 
+export async function setLastSyncAddedCount(count) {
+  await storageSet({ [KEYS.LAST_SYNC_ADDED_COUNT]: Number(count) || 0 });
+}
+
+export async function getLastSyncAddedCount() {
+  const result = await storageGet(KEYS.LAST_SYNC_ADDED_COUNT);
+  const value = result[KEYS.LAST_SYNC_ADDED_COUNT];
+  return Number.isFinite(value) ? value : null;
+}
+
+export async function setLastSyncDetectedCount(count) {
+  await storageSet({ [KEYS.LAST_SYNC_DETECTED_COUNT]: Number(count) || 0 });
+}
+
+export async function getLastSyncDetectedCount() {
+  const result = await storageGet(KEYS.LAST_SYNC_DETECTED_COUNT);
+  const value = result[KEYS.LAST_SYNC_DETECTED_COUNT];
+  return Number.isFinite(value) ? value : null;
+}
+
+export async function clearSyncMetrics() {
+  await storageSet({
+    [KEYS.LAST_SYNC_TIME]: null,
+    [KEYS.LAST_SYNC_ADDED_COUNT]: null,
+    [KEYS.LAST_SYNC_DETECTED_COUNT]: null,
+  });
+}
+
 
 export async function setSyncStatus(message) {
   await storageSet({ [KEYS.SYNC_STATUS]: message });
@@ -73,6 +121,10 @@ export async function setUserEmail(email) {
   await storageSet({ [KEYS.USER_EMAIL]: email });
 }
 
+export async function clearUserEmail() {
+  await storageSet({ [KEYS.USER_EMAIL]: "" });
+}
+
 export async function getUserEmailFromStorage() {
   const result = await storageGet(KEYS.USER_EMAIL);
   return result[KEYS.USER_EMAIL] || null;
@@ -85,15 +137,74 @@ const DEFAULT_SETTINGS = {
   sheetName: CONFIG.SHEET_NAME,
   jiraBaseUrl: CONFIG.JIRA_BASE_URL,
   autoSyncIntervalMinutes: CONFIG.AUTO_SYNC_INTERVAL_MINUTES,
-  gmailSearchQuery: CONFIG.GMAIL_SEARCH_QUERY,
+  dailyReportEnabled: CONFIG.DAILY_REPORT_ENABLED,
+  dailyReportHour: CONFIG.DAILY_REPORT_HOUR,
+  dailyReportMinute: CONFIG.DAILY_REPORT_MINUTE,
+  reportRecipientEmail: CONFIG.REPORT_RECIPIENT_EMAIL,
+  gmailDatePreset: CONFIG.GMAIL_DATE_PRESET,
+  gmailSearchQuery: "",
+  gmailFromDate: "",
+  gmailToDate: "",
+  maxTotalEmails: CONFIG.MAX_TOTAL_EMAILS,
+  maxConcurrentMessageFetches: CONFIG.MAX_CONCURRENT_MESSAGE_FETCHES,
+  maxConcurrentAiRequests: CONFIG.MAX_CONCURRENT_AI_REQUESTS,
+  fastModeEnabled: false,
+  enableAiSummaries: CONFIG.ENABLE_AI_SUMMARIES,
+  aiProvider: CONFIG.AI_PROVIDER,
+  aiSummaryMode: CONFIG.AI_SUMMARY_MODE,
+  openAiApiKey: "",
+  openAiModel: CONFIG.OPENAI_MODEL,
+  geminiApiKey: "",
+  geminiModel: CONFIG.GEMINI_MODEL,
+  consolidatedSheetName: CONFIG.CONSOLIDATED_SHEET_NAME,
 };
 
 export async function getSettings() {
-  const result = await storageGet(KEYS.SETTINGS);
-  return { ...DEFAULT_SETTINGS, ...(result[KEYS.SETTINGS] || {}) };
+  const [localResult, sessionResult] = await Promise.all([
+    storageGet(KEYS.SETTINGS),
+    storageSessionGet([KEYS.OPENAI_API_KEY, KEYS.GEMINI_API_KEY]),
+  ]);
+
+  const localSettings = localResult[KEYS.SETTINGS] || {};
+  const sessionOpenAiKey = sessionResult[KEYS.OPENAI_API_KEY];
+  const sessionGeminiKey = sessionResult[KEYS.GEMINI_API_KEY];
+  const settings = { ...DEFAULT_SETTINGS, ...localSettings };
+
+  // Backward-compat: if keys exist in local settings from older versions,
+  // surface them now and migrate them into session storage.
+  const migratedOpenAiKey = sessionOpenAiKey || localSettings.openAiApiKey || "";
+  const migratedGeminiKey = sessionGeminiKey || localSettings.geminiApiKey || "";
+  settings.openAiApiKey = migratedOpenAiKey;
+  settings.geminiApiKey = migratedGeminiKey;
+
+  if ((!sessionOpenAiKey && localSettings.openAiApiKey) || (!sessionGeminiKey && localSettings.geminiApiKey)) {
+    const { openAiApiKey, geminiApiKey, ...sanitizedLocalSettings } = localSettings;
+    await Promise.all([
+      storageSessionSet({
+        [KEYS.OPENAI_API_KEY]: localSettings.openAiApiKey || "",
+        [KEYS.GEMINI_API_KEY]: localSettings.geminiApiKey || "",
+      }),
+      storageSet({ [KEYS.SETTINGS]: sanitizedLocalSettings }),
+    ]);
+  }
+
+  return settings;
 }
 
 export async function saveSettings(settings) {
   const current = await getSettings();
-  await storageSet({ [KEYS.SETTINGS]: { ...current, ...settings } });
+  const merged = { ...current, ...settings };
+  const {
+    openAiApiKey = "",
+    geminiApiKey = "",
+    ...persistedSettings
+  } = merged;
+
+  await Promise.all([
+    storageSet({ [KEYS.SETTINGS]: persistedSettings }),
+    storageSessionSet({
+      [KEYS.OPENAI_API_KEY]: openAiApiKey,
+      [KEYS.GEMINI_API_KEY]: geminiApiKey,
+    }),
+  ]);
 }

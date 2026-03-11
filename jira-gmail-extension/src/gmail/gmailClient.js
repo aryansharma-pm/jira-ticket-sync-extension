@@ -15,22 +15,32 @@ const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
  * Fetch all message IDs matching a Gmail search query (handles pagination).
  *
  * @param {string} query    - Gmail search query string
- * @param {number} maxTotal - Hard cap on total messages to retrieve
+ * @param {Object} options
+ * @param {number} [options.maxTotal] - Hard cap on total messages to retrieve
+ * @param {number} [options.maxResultsPerPage] - Gmail page size (max 500)
  * @returns {Promise<string[]>} Array of Gmail message IDs
  */
-export async function fetchMessageIds(query, maxTotal = CONFIG.MAX_TOTAL_EMAILS) {
+export async function fetchMessageIds(query, options = {}) {
+  const maxTotal = Math.max(1, Number(options.maxTotal || CONFIG.MAX_TOTAL_EMAILS));
+  const maxResultsPerPage = Math.min(
+    500,
+    Math.max(1, Number(options.maxResultsPerPage || CONFIG.MAX_RESULTS_PER_PAGE))
+  );
   const ids = [];
   let pageToken = null;
 
   do {
     const params = new URLSearchParams({
       q: query,
-      maxResults: String(Math.min(CONFIG.MAX_RESULTS_PER_PAGE, maxTotal - ids.length)),
+      maxResults: String(Math.min(maxResultsPerPage, maxTotal - ids.length)),
     });
     if (pageToken) params.set("pageToken", pageToken);
 
     const url = `${GMAIL_BASE}/messages?${params}`;
-    const resp = await authenticatedFetch(url);
+    const resp = await fetchWithRetry(url, {
+      retries: 3,
+      retryStatuses: [429, 500, 502, 503, 504],
+    });
 
     if (!resp.ok) {
       const err = await resp.text();
@@ -60,14 +70,49 @@ export async function fetchMessageIds(query, maxTotal = CONFIG.MAX_TOTAL_EMAILS)
  * @param {string} messageId
  * @returns {Promise<Object>} Gmail message resource
  */
-export async function fetchMessage(messageId) {
-  const url = `${GMAIL_BASE}/messages/${messageId}?format=full`;
-  const resp = await authenticatedFetch(url);
+export async function fetchMessage(messageId, format = "full") {
+  const url = `${GMAIL_BASE}/messages/${messageId}?format=${encodeURIComponent(format)}`;
+  const resp = await fetchWithRetry(url, {
+    retries: 3,
+    retryStatuses: [429, 500, 502, 503, 504],
+  });
   if (!resp.ok) {
     const err = await resp.text();
     throw new Error(`Gmail fetch error ${resp.status}: ${err}`);
   }
   return resp.json();
+}
+
+async function fetchWithRetry(url, options = {}) {
+  const {
+    retries = 2,
+    retryStatuses = [429, 500, 502, 503, 504],
+    ...fetchOptions
+  } = options;
+
+  let attempt = 0;
+  let response = null;
+
+  while (attempt <= retries) {
+    response = await authenticatedFetch(url, fetchOptions);
+    if (!retryStatuses.includes(response.status)) {
+      return response;
+    }
+
+    if (attempt === retries) {
+      return response;
+    }
+
+    const delayMs = Math.min(2000, 300 * (2 ** attempt));
+    await sleep(delayMs);
+    attempt += 1;
+  }
+
+  return response;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ─── Header Extraction ────────────────────────────────────────────────────────
