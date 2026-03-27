@@ -7,9 +7,19 @@ import { authenticatedFetch } from "../utils/auth.js";
 
 const GMAIL_SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(String(value || ""));
+}
+
 export async function sendConsolidatedReportEmail({ recipientEmail, report }) {
   if (!recipientEmail) {
     throw new Error("Recipient email is required for scheduled reports.");
+  }
+  if (!isValidEmailAddress(recipientEmail)) {
+    throw new Error(`Invalid recipient email address: "${recipientEmail}"`);
+  }
+  if (!report || typeof report !== "object") {
+    throw new Error("Report data is required and must be an object.");
   }
 
   const syncDate = new Date(report.syncTimestamp || Date.now());
@@ -358,6 +368,7 @@ function buildSimplePdfFromLines(inputLines) {
 
 function escapePdfText(text) {
   return String(text || "")
+    .replace(/[^\x20-\x7E]/g, " ")  // Strip non-ASCII to keep byte offsets reliable
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");

@@ -7,7 +7,7 @@
 export const CONFIG = {
   // ─── Google OAuth ───────────────────────────────────────────────────────────
   // Must match the client ID in manifest.json -> oauth2.client_id
-  OAUTH_CLIENT_ID: "YOUR_CLIENT_ID.apps.googleusercontent.com",
+  OAUTH_CLIENT_ID: "182233530044-h7k4mcod7munop1tvbas6l8e3u536toq.apps.googleusercontent.com",
 
   // ─── Google Sheets ──────────────────────────────────────────────────────────
   // The spreadsheet where Jira ticket data will be written
@@ -38,9 +38,13 @@ export const CONFIG = {
   MAX_CONCURRENT_AI_REQUESTS: 4,
 
   // ─── Auto-sync ──────────────────────────────────────────────────────────────
-  // Alarm name used by Chrome alarms API
+  // Alarm names used by Chrome alarms API
   ALARM_NAME: "jira-gmail-sync",
   DAILY_REPORT_ALARM_NAME: "jira-gmail-daily-report",
+  MORNING_BRIEF_ALARM_NAME: "jira-gmail-morning-brief",
+  EVENING_REPORT_ALARM_NAME: "jira-gmail-evening-report",
+  REMINDER_CHECK_ALARM_NAME: "jira-gmail-reminder-check",
+  PRECALL_CHECK_ALARM_NAME: "jira-gmail-precall-check",
 
   // Auto-sync interval in minutes (set to 0 to disable auto-sync)
   AUTO_SYNC_INTERVAL_MINUTES: 0,
@@ -49,25 +53,54 @@ export const CONFIG = {
   DAILY_REPORT_MINUTE: 30,
   REPORT_RECIPIENT_EMAIL: "",
 
+  // ─── Intelligence Features ───────────────────────────────────────────────────
+  MORNING_BRIEF_ENABLED: false,
+  MORNING_BRIEF_HOUR: 7,
+  MORNING_BRIEF_MINUTE: 30,
+  EVENING_REPORT_ENABLED: false,
+  EVENING_REPORT_HOUR: 18,
+  EVENING_REPORT_MINUTE: 0,
+  REMINDER_CHECK_INTERVAL_MINUTES: 30,  // How often to scan for stale tasks / overdue follow-ups
+  PRECALL_CHECK_INTERVAL_MINUTES: 5,    // How often to check for imminent calendar meetings
+  FOLLOWUP_CHECK_HOURS: 48,             // Hours before a sent email is flagged with no reply
+  STALE_TASK_DAYS: 3,                   // Days of inactivity before a task is stale
+  GHOST_TASK_DAYS: 14,                  // Days before an untouched task is a ghost task
+  SLACK_ENABLED: false,
+  SLACK_CHANNEL_ID: "",
+  SLACK_MAX_MESSAGES: 200,
+  SLACK_LOOKBACK_HOURS: 72,
+
   // ─── AI Summaries ──────────────────────────────────────────────────────────
   ENABLE_AI_SUMMARIES: false,
-  AI_PROVIDER: "basic", // basic | openai | gemini
+  AI_PROVIDER: "openai", // openai (ChatGPT session) | anthropic (Claude session)
   AI_SUMMARY_MODE: "full", // full | consolidated_only
-  OPENAI_MODEL: "gpt-4.1-mini",
-  GEMINI_MODEL: "gemini-2.0-flash",
   CONSOLIDATED_SHEET_NAME: "Ticket Insights",
 
   // ─── Storage Keys ───────────────────────────────────────────────────────────
   STORAGE_KEYS: {
-    SEEN_TICKET_IDS: "seenTicketIds",   // Set of ticket numbers already pushed
-    LAST_SYNC_TIME:  "lastSyncTime",    // ISO timestamp of last successful sync
-    LAST_SYNC_ADDED_COUNT: "lastSyncAddedCount", // Count of tickets added in last sync
-    LAST_SYNC_DETECTED_COUNT: "lastSyncDetectedCount", // Count of unique tickets found in last sync
-    USER_EMAIL:      "userEmail",       // Authenticated user's email
-    SYNC_STATUS:     "syncStatus",      // Latest status message for the popup
-    SETTINGS:        "settings",        // User-configurable settings
-    OPENAI_API_KEY:  "openAiApiKey",
-    GEMINI_API_KEY:  "geminiApiKey",
-    AUDIT_LOG:       "auditLog",        // Recent sync + AI execution events
+    // Core sync
+    SEEN_TICKET_IDS:          "seenTicketIds",
+    LAST_SYNC_TIME:           "lastSyncTime",
+    LAST_SYNC_ADDED_COUNT:    "lastSyncAddedCount",
+    LAST_SYNC_DETECTED_COUNT: "lastSyncDetectedCount",
+    USER_EMAIL:               "userEmail",
+    SYNC_STATUS:              "syncStatus",
+    SETTINGS:                 "settings",
+    AUDIT_LOG:                "auditLog",
+
+    // Intelligence features
+    TASK_STORE:               "taskStore",         // Unified task objects
+    FOLLOWUP_TRACKER:         "followupTracker",   // Sent emails expecting replies
+    COMMITMENTS:              "commitments",        // Self-commitments from outbound email
+    SENTIMENT_LOG:            "sentimentLog",       // Sentiment history per sender
+    DECISION_LOG:             "decisionLog",        // Auto-recorded decisions
+    REMINDER_LOG:             "reminderLog",        // Last computed reminder alerts
+    LAST_PRECALL_BRIEF_EVENT: "lastPrecallBriefEvent", // Prevents duplicate pre-call briefs
+    SLACK_BOT_TOKEN:          "slackBotToken",        // Slack bot token (session storage)
+    SLACK_THREADS:            "slackThreads",          // Cached Slack threads
+
+    // JMD Assistant
+    ATLASSIAN_TOKEN:          "atlassianToken",        // Atlassian API token (session storage)
+    ASSISTANT_HISTORY:        "assistantHistory",      // JMD assistant chat history
   },
 };

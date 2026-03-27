@@ -1,20 +1,16 @@
 /**
  * aiClient.js
  * Summarization for ticket rows and sync rollups.
- * Supports:
- *  - basic (local rule-based, no API key)
- *  - openai
- *  - gemini
+ * Uses existing browser sessions for AI (no API keys required):
+ *  - openai    → ChatGPT (chatgpt.com) — user must be signed in
+ *  - anthropic → Claude  (claude.ai)   — user must be signed in
+ * Falls back to local basic summarization if the session call fails.
  */
 
-const OPENAI_BASE_URL = "https://api.openai.com/v1/responses";
-const DEFAULT_MODEL = "gpt-4.1-mini";
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
-const MAX_TICKET_CONTEXT_CHARS = 6000;
+import { callSessionProvider } from "./sessionClient.js";
+
+const MAX_TICKET_CONTEXT_CHARS      = 6000;
 const MAX_CONSOLIDATED_CONTEXT_CHARS = 12000;
-const AI_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
-const AI_MAX_RETRIES = 2;
 
 export function isAiConfigured(settings) {
   return Boolean(settings.enableAiSummaries);
@@ -34,25 +30,21 @@ export async function buildAiArtifacts(
     };
   }
 
-  const requestedProvider = getRequestedAiProvider(settings);
   const provider = getEffectiveAiProvider(settings);
-  const fallbackToBasicAllowed = provider !== "basic";
   const summariesByTicket = new Map();
   const isConsolidatedOnly = settings.aiSummaryMode === "consolidated_only";
-  const providerLabel = provider === "basic" ? "Basic (local)" : provider;
+  const providerLabel = provider === "basic" ? "Basic (local)" : provider === "openai" ? "ChatGPT" : "Claude";
   onProgress(`AI provider: ${providerLabel}.`);
-  if (requestedProvider !== provider) {
-    onProgress(`AI fallback active: "${requestedProvider}" not fully configured, using Basic mode.`);
-  }
-  let consolidated = { summary: "", actionItems: "" };
-  let fallbackUsed = requestedProvider !== provider;
-  let fallbackReason = requestedProvider !== provider ? "provider not configured" : "";
+
+  let consolidated = { summary: "", actionItems: "", blockers: "", risks: "", highlights: "" };
+  let fallbackUsed = false;
+  let fallbackReason = "";
 
   try {
     if (!isConsolidatedOnly) {
-      const maxConcurrentAiRequests = Math.max(1, Number(settings.maxConcurrentAiRequests || 4));
+      const maxConcurrent = Math.max(1, Number(settings.maxConcurrentAiRequests || 2));
       let completed = 0;
-      await runWithConcurrency(entries, maxConcurrentAiRequests, async (entry) => {
+      await runWithConcurrency(entries, maxConcurrent, async (entry) => {
         throwIfCancelled(shouldCancel);
         const summary = await summarizeTicket(entry, settings, provider);
         summariesByTicket.set(entry.ticketNumber, summary);
@@ -74,21 +66,16 @@ export async function buildAiArtifacts(
     consolidated = await summarizeCollection(enrichedEntries, settings, provider);
   } catch (err) {
     if (String(err?.message || "") === "Sync stopped by user.") throw err;
-    onProgress(
-      fallbackToBasicAllowed
-        ? `AI provider failed (${provider}); falling back to Basic summaries…`
-        : "Basic summarization hit an error; retrying with safe local fallback…"
-    );
-    if (fallbackToBasicAllowed) {
-      fallbackUsed = true;
-    }
+    onProgress(`AI provider failed (${providerLabel}); falling back to Basic summaries…`);
+    fallbackUsed = true;
     fallbackReason = String(err?.message || "provider error");
-    summariesByTicket.clear();
 
     if (!isConsolidatedOnly) {
       for (const entry of entries) {
-        throwIfCancelled(shouldCancel);
-        summariesByTicket.set(entry.ticketNumber, summarizeTicketBasic(entry));
+        if (!summariesByTicket.has(entry.ticketNumber)) {
+          throwIfCancelled(shouldCancel);
+          summariesByTicket.set(entry.ticketNumber, summarizeTicketBasic(entry));
+        }
       }
     }
 
@@ -96,21 +83,25 @@ export async function buildAiArtifacts(
       ...entry,
       aiSummary: summariesByTicket.get(entry.ticketNumber) || sanitizeOneLine(entry.emailSubject || entry.ticketTitle || ""),
     }));
-    consolidated = summarizeCollectionBasic(enrichedEntries);
+    const basic = summarizeCollectionBasic(enrichedEntries);
+    consolidated = { ...basic, blockers: "", risks: "", highlights: "" };
   }
 
   return {
     summariesByTicket,
-    consolidatedSummary: consolidated.summary,
+    consolidatedSummary:     consolidated.summary,
     consolidatedActionItems: consolidated.actionItems,
-    providerRequested: requestedProvider,
+    consolidatedBlockers:    consolidated.blockers,
+    consolidatedRisks:       consolidated.risks,
+    consolidatedHighlights:  consolidated.highlights,
+    providerRequested: provider,
     providerUsed: fallbackUsed ? "basic" : provider,
     fallbackUsed,
     fallbackReason,
   };
 }
 
-async function summarizeTicket(entry, settings, provider) {
+async function summarizeTicket(entry, _settings, provider) {
   if (provider === "basic") {
     return summarizeTicketBasic(entry);
   }
@@ -127,26 +118,21 @@ async function summarizeTicket(entry, settings, provider) {
     MAX_TICKET_CONTEXT_CHARS
   );
 
-  const prompt = [
-    "Summarize the Jira-related email context for one ticket.",
-    "Return only JSON in this shape: {\"summary\":\"...\"}.",
-    "The summary must be a single concise sentence under 35 words.",
-    "Focus on the issue, latest status, and any explicit next step if present.",
-    content,
-  ].join("\n\n");
+  const prompt = `You are an engineering manager reviewing a Jira ticket email update.
+Analyze the email below and return ONLY valid JSON with this exact shape:
+{"summary":"..."}
 
-  const response = await callAiProvider(prompt, settings, provider, {
-    name: "ticket_summary_payload",
-    schema: {
-      type: "object",
-      properties: {
-        summary: { type: "string" },
-      },
-      required: ["summary"],
-      additionalProperties: false,
-    },
-  });
-  const parsed = safeJsonParse(response);
+Rules for summary (max 50 words, one sentence):
+- State what the ticket is actually about — do NOT copy the subject line verbatim, rephrase meaningfully
+- Include the current state: blocked / under review / resolved / awaiting response / deployed / escalated
+- Include the specific next step or owner if mentioned (e.g. "waiting on infra team to provision DB" not "action required")
+- If there is urgency (outage, P0/P1, deadline), state it clearly
+- Be concrete. Never write filler like "an update was received" or "the email discusses"
+
+${content}`;
+
+  const rawText = await callAiProvider(prompt, provider);
+  const parsed = safeJsonParse(rawText);
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
   if (!summary) {
     throw new Error("AI response did not include a valid ticket summary.");
@@ -154,7 +140,7 @@ async function summarizeTicket(entry, settings, provider) {
   return summary;
 }
 
-async function summarizeCollection(entries, settings, provider) {
+async function summarizeCollection(entries, _settings, provider) {
   if (provider === "basic") {
     return summarizeCollectionBasic(entries);
   }
@@ -163,154 +149,50 @@ async function summarizeCollection(entries, settings, provider) {
     entries
       .map((entry) => [
         `Ticket: ${entry.ticketNumber}`,
-        `AI Summary: ${entry.aiSummary || ""}`,
+        `Summary: ${entry.aiSummary || ""}`,
         `Subject: ${entry.emailSubject || ""}`,
         `From: ${entry.from || ""}`,
+        `Date: ${entry.date || ""}`,
       ].join("\n"))
       .join("\n\n---\n\n"),
     MAX_CONSOLIDATED_CONTEXT_CHARS
   );
 
-  const prompt = [
-    "Create a consolidated Jira ticket report across multiple emails.",
-    "Return only JSON in this shape: {\"summary\":\"...\",\"actionItems\":\"...\"}.",
-    "summary: 2-4 short sentences covering the major themes, urgency, and repeated blockers.",
-    "actionItems: a short semicolon-separated list of next actions, or an empty string if none are clear.",
-    content,
-  ].join("\n\n");
+  const prompt = `You are an engineering manager writing a concise daily standup brief from Jira email updates.
 
-  const response = await callAiProvider(prompt, settings, provider, {
-    name: "consolidated_summary_payload",
-    schema: {
-      type: "object",
-      properties: {
-        summary: { type: "string" },
-        actionItems: { type: "string" },
-      },
-      required: ["summary", "actionItems"],
-      additionalProperties: false,
-    },
-  });
-  const parsed = safeJsonParse(response);
-  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+Ticket updates:
+${content}
+
+Return ONLY valid JSON with this exact shape (no markdown, no extra keys):
+{
+  "summary": "2-3 sentences: overall health of the ticket landscape, the most critical theme, and one observation about patterns or bottlenecks. Be specific — use ticket numbers and facts from the emails.",
+  "actionItems": "Numbered list of concrete actions that need to happen TODAY or this week. Each item must start with a verb, reference a ticket number, and say WHY it is urgent. Example: '1. Follow up with infra team on PROJ-42 — DB provisioning is blocking 3 dependent tickets. 2. Close PROJ-18 — fix deployed 2 days ago, no closure email sent.' Use empty string if genuinely nothing needs action.",
+  "blockers": "Comma-separated list of actively blocked tickets with a one-line reason for each. Example: 'PROJ-12 (waiting on legal sign-off), PROJ-33 (dependency on PROJ-44 unresolved)'. Empty string if no blockers.",
+  "risks": "1-2 sentences about tickets that could escalate or miss a deadline in the next 24-48 hours if not addressed. Name the ticket and why. Empty string if nothing at risk.",
+  "highlights": "1-2 sentences about tickets that were resolved, shipped, or made notable progress. Keep it factual. Empty string if nothing to celebrate."
+}
+
+Be direct, specific, and actionable. Avoid generic statements like 'multiple tickets need attention'.`;
+
+  const rawText = await callAiProvider(prompt, provider);
+  const parsed = safeJsonParse(rawText);
+  const summary     = typeof parsed.summary     === "string" ? parsed.summary.trim()     : "";
   const actionItems = typeof parsed.actionItems === "string" ? parsed.actionItems.trim() : "";
+  const blockers    = typeof parsed.blockers    === "string" ? parsed.blockers.trim()    : "";
+  const risks       = typeof parsed.risks       === "string" ? parsed.risks.trim()       : "";
+  const highlights  = typeof parsed.highlights  === "string" ? parsed.highlights.trim()  : "";
+
   if (!summary && !actionItems) {
     throw new Error("AI response did not include consolidated summary content.");
   }
-
-  return {
-    summary,
-    actionItems,
-  };
+  return { summary, actionItems, blockers, risks, highlights };
 }
 
-async function callAiProvider(prompt, settings, provider, schemaConfig) {
-  if (provider === "gemini") {
-    return callGemini(prompt, settings, schemaConfig);
-  }
-  if (provider === "openai") {
-    return callOpenAi(prompt, settings, schemaConfig);
-  }
-  throw new Error(`Unsupported AI provider: ${provider}`);
+async function callAiProvider(prompt, provider) {
+  return callSessionProvider(prompt, provider);
 }
 
-async function callOpenAi(prompt, settings, schemaConfig) {
-  const response = await postJsonWithRetry(OPENAI_BASE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.openAiApiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.openAiModel || DEFAULT_MODEL,
-      input: prompt,
-      text: {
-        format: {
-          type: "json_schema",
-          name: schemaConfig.name,
-          strict: true,
-          schema: schemaConfig.schema,
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI error ${response.status}: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  const outputText = data.output_text;
-
-  if (typeof outputText !== "string" || !outputText.trim()) {
-    throw new Error("OpenAI response did not include output_text.");
-  }
-
-  return outputText;
-}
-
-async function callGemini(prompt, settings, schemaConfig) {
-  const model = settings.geminiModel || DEFAULT_GEMINI_MODEL;
-  const url =
-    `${GEMINI_BASE_URL}/${encodeURIComponent(model)}:generateContent` +
-    `?key=${encodeURIComponent(settings.geminiApiKey)}`;
-
-  const response = await postJsonWithRetry(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: toGeminiSchema(schemaConfig.schema),
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini error ${response.status}: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  const outputText = extractGeminiText(data);
-  if (!outputText) {
-    throw new Error("Gemini response did not include text content.");
-  }
-  return outputText;
-}
-
-async function postJsonWithRetry(url, init) {
-  let attempt = 0;
-  let response = null;
-  while (attempt <= AI_MAX_RETRIES) {
-    response = await fetch(url, init);
-    if (!AI_RETRY_STATUSES.has(response.status)) {
-      return response;
-    }
-    if (response.status === 429) {
-      const body = await response.clone().text().catch(() => "");
-      if (/insufficient_quota|quota/i.test(body)) {
-        return response;
-      }
-    }
-    if (attempt === AI_MAX_RETRIES) {
-      return response;
-    }
-    const retryAfterSeconds = Number.parseInt(response.headers.get("retry-after") || "", 10);
-    const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-      ? retryAfterSeconds * 1000
-      : Math.min(4000, 350 * (2 ** attempt));
-    await sleep(retryAfterMs);
-    attempt += 1;
-  }
-  return response;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function truncate(text, maxChars) {
   if (!text || text.length <= maxChars) return text;
@@ -332,49 +214,15 @@ function throwIfCancelled(shouldCancel) {
 }
 
 function getRequestedAiProvider(settings) {
-  const provider = String(settings.aiProvider || "basic").toLowerCase();
-  if (provider === "gemini" || provider === "openai" || provider === "basic") return provider;
-  return "basic";
+  const provider = String(settings.aiProvider || "openai").toLowerCase();
+  if (["openai", "anthropic"].includes(provider)) return provider;
+  return "openai";
 }
 
 function getEffectiveAiProvider(settings) {
   const requested = getRequestedAiProvider(settings);
-  if (requested === "gemini") {
-    return settings.geminiApiKey ? "gemini" : "basic";
-  }
-  if (requested === "openai") {
-    return settings.openAiApiKey ? "openai" : "basic";
-  }
+  if (["openai", "anthropic"].includes(requested)) return requested;
   return "basic";
-}
-
-function toGeminiSchema(jsonSchema) {
-  const convert = (node) => {
-    if (Array.isArray(node)) return node.map(convert);
-    if (!node || typeof node !== "object") return node;
-    const out = {};
-    for (const [key, value] of Object.entries(node)) {
-      if (key === "type" && typeof value === "string") {
-        out[key] = value.toUpperCase();
-      } else if (key === "properties" && value && typeof value === "object") {
-        const mapped = {};
-        for (const [propName, propSchema] of Object.entries(value)) {
-          mapped[propName] = convert(propSchema);
-        }
-        out[key] = mapped;
-      } else {
-        out[key] = convert(value);
-      }
-    }
-    return out;
-  };
-  return convert(jsonSchema);
-}
-
-function extractGeminiText(data) {
-  const parts = data?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) return "";
-  return parts.map((part) => part?.text || "").join("").trim();
 }
 
 function sanitizeOneLine(text) {
@@ -382,9 +230,9 @@ function sanitizeOneLine(text) {
 }
 
 function summarizeTicketBasic(entry) {
-  const subject = sanitizeOneLine(entry.emailSubject || entry.ticketTitle || "");
-  const text = `${entry.emailSubject || ""}\n${entry.body || ""}\n${entry.snippet || ""}`.toLowerCase();
-  const status = detectStatus(text);
+  const subject  = sanitizeOneLine(entry.emailSubject || entry.ticketTitle || "");
+  const text     = `${entry.emailSubject || ""}\n${entry.body || ""}\n${entry.snippet || ""}`.toLowerCase();
+  const status   = detectStatus(text);
   const priority = detectPriority(text);
   const nextStep = extractNextStep(entry.body || entry.snippet || "");
 
@@ -396,13 +244,7 @@ function summarizeTicketBasic(entry) {
 }
 
 function summarizeCollectionBasic(entries) {
-  const statusCounts = {
-    blocked: 0,
-    "in progress": 0,
-    resolved: 0,
-    pending: 0,
-    updated: 0,
-  };
+  const statusCounts = { blocked: 0, "in progress": 0, resolved: 0, pending: 0, updated: 0 };
   let highPriorityCount = 0;
   const actionItems = [];
 
@@ -411,7 +253,6 @@ function summarizeCollectionBasic(entries) {
     const status = detectStatus(source);
     statusCounts[status] = (statusCounts[status] || 0) + 1;
     if (detectPriority(source) === "high") highPriorityCount += 1;
-
     const nextStep = extractNextStep(entry.body || entry.snippet || "");
     if (nextStep) actionItems.push(nextStep);
   }
@@ -474,7 +315,6 @@ function extractNextStep(text) {
 
 async function runWithConcurrency(items, concurrency, worker) {
   if (!items.length) return;
-
   let currentIndex = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (currentIndex < items.length) {
@@ -483,6 +323,5 @@ async function runWithConcurrency(items, concurrency, worker) {
       await worker(items[index], index);
     }
   });
-
   await Promise.all(workers);
 }
