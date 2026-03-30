@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Jira Gmail Tracker — Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <img src="../../icons/logo-mark.svg" alt="Fynd" class="sidebar-logo" />
+      <div class="sidebar-brand-copy">
+        <span class="sidebar-kicker">Jira Gmail Tracker</span>
+        <span class="sidebar-title">Dashboard</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-section="overview" href="#">
+        <span class="nav-icon">◈</span> Overview
+      </a>
+      <a class="nav-item" data-section="tickets" href="#">
+        <span class="nav-icon">⊞</span> Tickets
+      </a>
+      <a class="nav-item" data-section="intelligence" href="#">
+        <span class="nav-icon">◎</span> Intelligence
+        <span class="nav-badge" id="navAlertBadge" hidden></span>
+      </a>
+      <a class="nav-item" data-section="assistant" href="#">
+        <span class="nav-icon">⬡</span> Assistant
+      </a>
+      <a class="nav-item" data-section="settings" href="#">
+        <span class="nav-icon">◫</span> Settings
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <div class="sidebar-user-avatar" id="userAvatarInitial">?</div>
+        <div class="sidebar-user-info">
+          <span class="sidebar-user-name" id="sidebarUserName">Loading…</span>
+          <span class="sidebar-user-role">Signed in</span>
+        </div>
+      </div>
+      <button class="sidebar-signout" id="btnDashboardSignOut" title="Sign out">↩</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 class="topbar-title" id="sectionTitle">Overview</h2>
+        <p class="topbar-sub" id="sectionSub">Your engineering manager intelligence hub</p>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-status" id="topbarStatus">
+          <span class="topbar-status-dot" id="topbarStatusDot"></span>
+          <span class="topbar-status-text" id="topbarStatusText">Ready</span>
+        </div>
+        <button class="topbar-sync-btn" id="btnDashboardSync">
+          <span>▶</span> Sync Now
+        </button>
+      </div>
+    </header>
+
+    <!-- ───────── OVERVIEW SECTION ───────── -->
+    <section class="section" id="section-overview">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-icon">📨</span>
+          <div class="kpi-body">
+            <span class="kpi-value" id="kpiLastCount">—</span>
+            <span class="kpi-label">Tickets last sync</span>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-icon">🕐</span>
+          <div class="kpi-body">
+            <span class="kpi-value" id="kpiLastSync">—</span>
+            <span class="kpi-label">Last synced</span>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-icon">📅</span>
+          <div class="kpi-body">
+            <span class="kpi-value" id="kpiNextReport">—</span>
+            <span class="kpi-label">Next report</span>
+          </div>
+        </div>
+        <div class="kpi-card kpi-card-alert" id="kpiAlertCard">
+          <span class="kpi-icon">🔔</span>
+          <div class="kpi-body">
+            <span class="kpi-value" id="kpiAlertCount">0</span>
+            <span class="kpi-label">Active alerts</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content grid -->
+      <div class="overview-grid">
+
+        <!-- Setup checklist -->
+        <div class="card" id="ovSetupCard">
+          <div class="card-header">
+            <span class="card-title">Setup Checklist</span>
+            <span class="badge badge-green" id="ovSetupProgress">0/5</span>
+          </div>
+          <ul class="checklist" id="ovSetupList">
+            <li class="check-item" id="ovAuthItem"><span class="check-dot"></span><span>Google account connected</span></li>
+            <li class="check-item" id="ovSheetItem"><span class="check-dot"></span><span>Spreadsheet ID configured</span></li>
+            <li class="check-item" id="ovJiraItem"><span class="check-dot"></span><span>Jira base URL configured</span></li>
+            <li class="check-item" id="ovReportItem"><span class="check-dot"></span><span>Report email configured</span></li>
+            <li class="check-item" id="ovAiItem"><span class="check-dot"></span><span>AI provider configured</span></li>
+          </ul>
+        </div>
+
+        <!-- Sync Actions -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Actions</span>
+          </div>
+          <div class="action-list">
+            <button class="action-btn action-primary" id="ovBtnSync">
+              <span class="action-btn-icon">▶</span>
+              <div>
+                <span class="action-btn-label">Run Sync</span>
+                <span class="action-btn-sub">Scan Gmail → write to Sheet</span>
+              </div>
+            </button>
+            <button class="action-btn" id="ovBtnOpenSheet">
+              <span class="action-btn-icon">📊</span>
+              <div>
+                <span class="action-btn-label">Open Sheet</span>
+                <span class="action-btn-sub">View ticket data in Google Sheets</span>
+              </div>
+            </button>
+            <button class="action-btn" id="ovBtnTestReport">
+              <span class="action-btn-icon">📧</span>
+              <div>
+                <span class="action-btn-label">Send Test Report</span>
+                <span class="action-btn-sub">Preview daily email report</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Today's Meetings -->
+        <div class="card card-wide">
+          <div class="card-header">
+            <span class="card-title">Today's Meetings</span>
+            <span class="badge badge-blue" id="ovMeetingCount" hidden></span>
+          </div>
+          <ul class="meeting-list-dash" id="ovMeetingList">
+            <li class="empty-state">Calendar integration not enabled or no meetings today.</li>
+          </ul>
+        </div>
+
+        <!-- Active Alerts -->
+        <div class="card card-wide">
+          <div class="card-header">
+            <span class="card-title">Active Alerts</span>
+            <button class="btn-xs-dash" id="ovBtnRunChecks">Run checks</button>
+          </div>
+          <ul class="alert-list-dash" id="ovAlertList">
+            <li class="empty-state">No alerts. Click "Run checks" to refresh.</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ───────── INTELLIGENCE SECTION ───────── -->
+    <section class="section hidden" id="section-intelligence">
+      <div class="intel-grid">
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Alerts</span>
+            <button class="btn-xs-dash" id="intelBtnRunChecks">Run checks</button>
+          </div>
+          <ul class="intel-list-dash" id="intelAlertList">
+            <li class="empty-state">No alerts.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Pending Follow-ups</span>
+          </div>
+          <ul class="intel-list-dash" id="intelFollowupList">
+            <li class="empty-state">No pending follow-ups.</li>
+          </ul>
+        </div>
+
+        <div class="card card-wide">
+          <div class="card-header">
+            <span class="card-title">Tracked Commitments</span>
+          </div>
+          <ul class="intel-list-dash" id="intelCommitmentList">
+            <li class="empty-state">No commitments tracked.</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ───────── ASSISTANT SECTION ───────── -->
+    <section class="section hidden" id="section-assistant">
+      <div class="assistant-dash-wrap">
+        <div class="card assistant-card">
+          <div class="card-header">
+            <span class="card-title">JMD Platform Assistant</span>
+            <span class="badge badge-green" id="dashAssistantProviderBadge" hidden></span>
+          </div>
+
+          <div class="dash-chips" id="dashChips">
+            <button class="dash-chip" data-q="List all services">📋 All services</button>
+            <button class="dash-chip" data-q="Who handles OMS?">🛠 OMS DRI</button>
+            <button class="dash-chip" data-q="What changed in v2.1.0?">🚀 v2.1.0 changes</button>
+            <button class="dash-chip" data-q="What is Megatron?">🛒 Megatron</button>
+            <button class="dash-chip" data-q="Who handles payments?">💳 Payments DRI</button>
+            <button class="dash-chip" data-q="What is Stormbreaker?">📦 Stormbreaker</button>
+            <button class="dash-chip" data-q="How to authenticate with platform API?">🌐 Platform API</button>
+            <button class="dash-chip" data-q="How to authenticate with storefront API?">🛍 Storefront API</button>
+          </div>
+
+          <div class="dash-messages" id="dashMessages">
+            <div class="dash-msg assistant">
+              <div class="dash-bubble">Hi! I'm the JMD Platform Assistant. Ask me about DRI contacts, version features, platform/storefront API, or paste a Jira ticket ID for deep analysis.</div>
+            </div>
+          </div>
+
+          <div class="dash-input-row">
+            <textarea id="dashAssistantInput" class="dash-input" placeholder="Ask about DRI, features, Megatron flags, OMS states, or paste a Jira ticket ID…" rows="1"></textarea>
+            <button class="dash-send-btn" id="dashSendBtn">Send</button>
+          </div>
+
+          <div class="dash-footer">
+            <button class="btn-xs-dash" id="dashClearBtn">Clear chat</button>
+            <span class="dash-ai-note" id="dashAiNote">Local knowledge base · AI available when summaries are on</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── TICKETS SECTION ───────── -->
+    <section class="section hidden" id="section-tickets">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Recent Tickets</span>
+          <span class="badge badge-gray" id="ticketCountBadge">Loading…</span>
+        </div>
+        <p class="empty-state" style="padding:16px 0;">
+          Open your Google Sheet to view all synced tickets. Click <strong>Actions → Open Sheet</strong> from the Overview tab.
+        </p>
+        <div class="ticket-actions">
+          <button class="topbar-sync-btn" id="ticketBtnSync">▶ Sync Now</button>
+          <button class="btn-outline" id="ticketBtnSheet">📊 Open Sheet</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── SETTINGS SECTION ───────── -->
+    <section class="section hidden" id="section-settings">
+      <div class="settings-grid">
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Sheets & Jira</span></div>
+          <div class="form-body">
+            <label class="form-field">
+              <span>Spreadsheet ID</span>
+              <input type="text" id="ds-spreadsheetId" placeholder="1BxiM…" />
+            </label>
+            <label class="form-field">
+              <span>Sheet Name</span>
+              <input type="text" id="ds-sheetName" placeholder="Jira Tickets" />
+            </label>
+            <label class="form-field">
+              <span>Jira Base URL</span>
+              <input type="url" id="ds-jiraBaseUrl" placeholder="https://yourcompany.atlassian.net" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Sync Settings</span></div>
+          <div class="form-body">
+            <label class="form-field">
+              <span>Date Range</span>
+              <select id="ds-gmailDatePreset">
+                <option value="last_30">Latest 30 days</option>
+                <option value="prev_30">Last month 30 days</option>
+                <option value="last_60">Last 60 days</option>
+                <option value="last_90">Last 90 days</option>
+                <option value="last_120">Last 120 days</option>
+                <option value="custom">Custom date range</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Max emails per sync</span>
+              <input type="number" id="ds-maxTotalEmails" min="100" max="20000" step="100" />
+            </label>
+            <label class="form-field">
+              <span>Auto-sync interval (minutes, 0 = off)</span>
+              <input type="number" id="ds-autoSyncInterval" min="0" max="1440" />
+            </label>
+            <label class="form-toggle">
+              <span>Fast mode</span>
+              <input type="checkbox" id="ds-fastModeEnabled" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Reports & Briefings</span></div>
+          <div class="form-body">
+            <label class="form-field">
+              <span>Report recipient email</span>
+              <input type="email" id="ds-reportRecipientEmail" placeholder="you@company.com" />
+            </label>
+            <label class="form-toggle">
+              <span>Daily email report (9:30 AM)</span>
+              <input type="checkbox" id="ds-dailyReportEnabled" />
+            </label>
+            <label class="form-field">
+              <span>Daily report time</span>
+              <input type="time" id="ds-dailyReportTime" />
+            </label>
+            <label class="form-toggle">
+              <span>Morning brief email</span>
+              <input type="checkbox" id="ds-morningBriefEnabled" />
+            </label>
+            <label class="form-field">
+              <span>Morning brief time</span>
+              <input type="time" id="ds-morningBriefTime" />
+            </label>
+            <label class="form-toggle">
+              <span>Evening report email</span>
+              <input type="checkbox" id="ds-eveningReportEnabled" />
+            </label>
+            <label class="form-field">
+              <span>Evening report time</span>
+              <input type="time" id="ds-eveningReportTime" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">AI Provider</span></div>
+          <div class="form-body">
+            <label class="form-toggle">
+              <span>Enable AI summaries</span>
+              <input type="checkbox" id="ds-enableAiSummaries" />
+            </label>
+            <label class="form-field">
+              <span>AI Provider</span>
+              <select id="ds-aiProvider">
+                <option value="openai">ChatGPT (chatgpt.com)</option>
+                <option value="anthropic">Claude (claude.ai)</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Summary Mode</span>
+              <select id="ds-aiSummaryMode">
+                <option value="full">Per-ticket + Consolidated</option>
+                <option value="consolidated_only">Consolidated only (faster)</option>
+              </select>
+            </label>
+            <p class="form-help">Uses your active browser session — no API keys needed. Sign in to chatgpt.com or claude.ai in Chrome first.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Atlassian (Jira Live Data)</span></div>
+          <div class="form-body">
+            <label class="form-field">
+              <span>Atlassian Domain</span>
+              <input type="text" id="ds-atlassianDomain" placeholder="yourcompany.atlassian.net" />
+            </label>
+            <label class="form-field">
+              <span>Atlassian Email</span>
+              <input type="email" id="ds-atlassianEmail" placeholder="you@company.com" />
+            </label>
+            <label class="form-field">
+              <span>Atlassian API Token</span>
+              <input type="password" id="ds-atlassianToken" placeholder="Token from id.atlassian.com" autocomplete="off" />
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Intelligence Features</span></div>
+          <div class="form-body">
+            <label class="form-toggle">
+              <span>Follow-up tracking</span>
+              <input type="checkbox" id="ds-enableFollowupTracking" />
+            </label>
+            <label class="form-toggle">
+              <span>Commitment tracking</span>
+              <input type="checkbox" id="ds-enableCommitmentTracking" />
+            </label>
+            <label class="form-toggle">
+              <span>Sentiment tracking</span>
+              <input type="checkbox" id="ds-enableSentimentTracking" />
+            </label>
+            <label class="form-toggle">
+              <span>Decision log</span>
+              <input type="checkbox" id="ds-enableDecisionLog" />
+            </label>
+            <label class="form-toggle">
+              <span>Calendar integration (pre-call briefs)</span>
+              <input type="checkbox" id="ds-enableCalendarIntegration" />
+            </label>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="settings-save-row">
+        <button class="topbar-sync-btn" id="dsBtnSave">Save Settings</button>
+        <button class="btn-outline btn-danger-outline" id="dsBtnClearCache">Clear Seen Cache</button>
+        <button class="btn-outline" id="dsBtnResetStats">Reset Stats</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Sync progress overlay -->
+  <div class="progress-overlay" id="progressOverlay" hidden>
+    <div class="progress-overlay-inner">
+      <div class="progress-bar-dash">
+        <div class="progress-fill-dash" id="dashProgressFill"></div>
+      </div>
+      <p class="progress-label-dash" id="dashProgressLabel">Initializing sync…</p>
+    </div>
+  </div>
+
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

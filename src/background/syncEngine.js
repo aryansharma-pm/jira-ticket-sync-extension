@@ -24,9 +24,13 @@ import {
   buildSheetRow,
   buildConsolidatedSheetRow,
 } from "../sheets/sheetsClient.js";
-import { getUserEmail } from "../utils/auth.js";
-import { getAuthToken } from "../utils/auth.js";
+import { getUserEmail, getAuthToken } from "../utils/auth.js";
 import { buildAiArtifacts, isAiConfigured } from "../ai/aiClient.js";
+import { detectActionRequest, registerFollowup, markThreadReplied } from "../gmail/followupTracker.js";
+import { extractCommitments, saveCommitments } from "../utils/commitmentExtractor.js";
+import { scoreSentiment, recordSenderSentiment } from "../utils/sentimentTracker.js";
+import { extractDecisions, saveDecisions } from "../utils/decisionLog.js";
+import { enrichTaskContext } from "../context/contextEngine.js";
 
 /**
  * Main sync function. Orchestrates the full pipeline:
@@ -43,10 +47,24 @@ import { buildAiArtifacts, isAiConfigured } from "../ai/aiClient.js";
  * @param {Function} [options.shouldCancel] - Optional callback returning true if sync should stop
  * @returns {Promise<{ added: number, detected: number, existing: number, skipped: number, total: number }>}
  */
+// Maximum wall-clock ms a sync is allowed to run before aborting to protect the service worker.
+const MAX_SYNC_DURATION_MS = 4 * 60 * 1000; // 4 minutes
+
 export async function runSync(options = {}) {
   const onProgress = options.onProgress || (() => {});
   const interactiveAuth = options.interactiveAuth ?? true;
   const shouldCancel = options.shouldCancel || (() => false);
+  const syncStartedAt = Date.now();
+
+  /** Throws if the sync has been running longer than MAX_SYNC_DURATION_MS. */
+  function checkTimeBudget() {
+    if (Date.now() - syncStartedAt > MAX_SYNC_DURATION_MS) {
+      throw new Error(
+        "Sync stopped: approaching service worker time limit. Reduce Max Emails or enable Fast Mode and retry."
+      );
+    }
+  }
+
   const settings = await getSettings();
   validateSyncSettings(settings);
 
@@ -153,6 +171,7 @@ export async function runSync(options = {}) {
   );
   await runWithConcurrency(messageIds, maxConcurrentMessageFetches, async (msgId) => {
     throwIfCancelled(shouldCancel);
+    checkTimeBudget();
     processed++;
 
     if (processed % 10 === 0 || processed === messageIds.length) {
@@ -190,6 +209,54 @@ export async function runSync(options = {}) {
       return; // User is not involved in this email
     }
 
+    // ── Intelligence processing (non-blocking — failures do not stop sync) ────
+    const isOutbound = userEmail && email.from.toLowerCase().includes(userEmail.toLowerCase());
+    try {
+      if (isOutbound) {
+        // Track sent emails that expect replies
+        if (settings.enableFollowupTracking && detectActionRequest(email.body)) {
+          await registerFollowup({
+            messageId: email.id,
+            threadId: message.threadId || email.id,
+            subject: email.subject,
+            to: email.to,
+            date: email.date,
+            checkAfterHours: settings.followupCheckHours || 48,
+            jiraTickets: ticketNumbers,
+          });
+        }
+        // Extract self-commitments ("I'll send X by Friday")
+        if (settings.enableCommitmentTracking) {
+          const commitments = extractCommitments(email);
+          if (commitments.length) await saveCommitments(commitments, email);
+        }
+      } else {
+        // Inbound: mark thread replied if we were tracking a follow-up on it
+        if (settings.enableFollowupTracking && message.threadId) {
+          await markThreadReplied(message.threadId);
+        }
+        // Track sentiment drift per sender
+        if (settings.enableSentimentTracking) {
+          const score = scoreSentiment(email.body);
+          await recordSenderSentiment(email.from, score, email.id);
+        }
+      }
+      // Extract decisions from all relevant emails
+      if (settings.enableDecisionLog) {
+        const decisions = extractDecisions(email.body, {
+          source: "email",
+          sourceId: email.id,
+          subject: email.subject,
+          participants: [email.from, email.to].filter(Boolean),
+          timestamp: email.date,
+          jiraTickets: ticketNumbers,
+        });
+        if (decisions.length) await saveDecisions(decisions);
+      }
+    } catch (intelligenceErr) {
+      console.warn("[Sync] Intelligence processing error (non-fatal):", intelligenceErr.message);
+    }
+
     // ── Emit one row per ticket found in the email ────────────────────────────
     for (const ticketNumber of ticketNumbers) {
       detectedTicketNumbers.add(ticketNumber);
@@ -225,6 +292,9 @@ export async function runSync(options = {}) {
   let consolidatedRow = null;
   let consolidatedSummary = "";
   let consolidatedActionItems = "";
+  let consolidatedBlockers = "";
+  let consolidatedRisks = "";
+  let consolidatedHighlights = "";
   let aiUnavailableReason = "";
   const aiSourceEntries = pendingEntries.length > 0
     ? pendingEntries
@@ -242,14 +312,22 @@ export async function runSync(options = {}) {
       }
 
       if (aiArtifacts.consolidatedSummary || aiArtifacts.consolidatedActionItems) {
-        consolidatedSummary = aiArtifacts.consolidatedSummary;
+        consolidatedSummary     = aiArtifacts.consolidatedSummary;
         consolidatedActionItems = aiArtifacts.consolidatedActionItems;
+        consolidatedBlockers    = aiArtifacts.consolidatedBlockers   || "";
+        consolidatedRisks       = aiArtifacts.consolidatedRisks      || "";
+        consolidatedHighlights  = aiArtifacts.consolidatedHighlights || "";
         consolidatedRow = buildConsolidatedSheetRow({
-          syncTimestamp: new Date().toISOString(),
-          ticketCount: aiSourceEntries.length,
-          ticketNumbers: aiSourceEntries.map((entry) => entry.ticketNumber),
-          summary: consolidatedSummary,
-          actionItems: consolidatedActionItems,
+          syncTimestamp:   new Date().toISOString(),
+          ticketCount:     aiSourceEntries.length,
+          newTicketsAdded: pendingEntries.length,
+          ticketNumbers:   aiSourceEntries.map((entry) => entry.ticketNumber),
+          summary:         consolidatedSummary,
+          actionItems:     consolidatedActionItems,
+          blockers:        consolidatedBlockers,
+          risks:           consolidatedRisks,
+          highlights:      consolidatedHighlights,
+          providerUsed:    aiArtifacts.providerUsed || "basic",
         });
       }
     } catch (err) {
@@ -273,7 +351,14 @@ export async function runSync(options = {}) {
     await writeRows(settings.spreadsheetId, settings.consolidatedSheetName, [consolidatedRow]);
   }
 
-  // ── Step 8: Persist sync metadata ───────────────────────────────────────────
+  // ── Step 8: Enrich task context (link tickets, find related tasks) ──────────
+  try {
+    await enrichTaskContext();
+  } catch (ctxErr) {
+    console.warn("[Sync] Context enrichment error (non-fatal):", ctxErr.message);
+  }
+
+  // ── Step 9: Persist sync metadata ───────────────────────────────────────────
   const now = new Date().toISOString();
   await setLastSyncTime(now);
   await setLastSyncAddedCount(newRows.length);
@@ -347,23 +432,35 @@ function validateSyncSettings(settings) {
   }
 }
 
+// ─── Helper: Extract email addresses from a header value ──────────────────────
+
+function parseEmailAddresses(headerValue) {
+  const addresses = [];
+  // Matches addr-spec in plain or "Name <addr>" formats
+  const regex = /[\w.+%-]+@[\w.-]+\.[a-z]{2,}/gi;
+  let match;
+  while ((match = regex.exec(String(headerValue || ""))) !== null) {
+    addresses.push(match[0].toLowerCase());
+  }
+  return addresses;
+}
+
 // ─── Helper: Is user in To or CC? ─────────────────────────────────────────────
 
 function isUserAddressed(email, userEmail) {
   if (!userEmail) return true; // If we don't know the user, assume all emails are relevant
-  const toLower = userEmail.toLowerCase();
-  return (
-    email.to.toLowerCase().includes(toLower) ||
-    email.cc.toLowerCase().includes(toLower)
-  );
+  const userEmailLower = userEmail.toLowerCase();
+  const toAddresses = parseEmailAddresses(email.to);
+  const ccAddresses = parseEmailAddresses(email.cc);
+  return toAddresses.includes(userEmailLower) || ccAddresses.includes(userEmailLower);
 }
 
 // ─── Helper: Is user mentioned in the body? ───────────────────────────────────
 
 function isUserMentionedInBody(email, userEmail) {
   if (!userEmail) return false;
-  const toLower = userEmail.toLowerCase();
-  return email.body.toLowerCase().includes(toLower);
+  const userEmailLower = userEmail.toLowerCase();
+  return parseEmailAddresses(email.body).includes(userEmailLower);
 }
 
 function throwIfCancelled(shouldCancel) {
@@ -423,6 +520,12 @@ function buildEffectiveGmailQuery(settings) {
   if (toDate) {
     // Gmail `before:` is exclusive, so shift by +1 day for inclusive end date.
     parts.push(`before:${formatGmailDate(addDays(toDate, 1))}`);
+  }
+
+  // Fast mode: let Gmail pre-filter to emails where the user is To/CC.
+  // This reduces the fetch set server-side instead of filtering locally.
+  if (settings.fastModeEnabled) {
+    parts.push("(to:me OR cc:me)");
   }
 
   const query = parts.join(" ").trim();

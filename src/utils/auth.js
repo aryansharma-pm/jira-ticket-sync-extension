@@ -34,11 +34,21 @@ export async function getAuthToken(interactive = true) {
 }
 
 function assertOAuthClientConfigured() {
-  const clientId = String(CONFIG.OAUTH_CLIENT_ID || "").trim();
-  if (!clientId || clientId.includes("YOUR_CLIENT_ID")) {
+  const manifestClientId = String(chrome.runtime.getManifest?.()?.oauth2?.client_id || "").trim();
+  const configClientId = String(CONFIG.OAUTH_CLIENT_ID || "").trim();
+
+  if (!manifestClientId || manifestClientId.includes("YOUR_CLIENT_ID")) {
     throw new Error(
-      "OAuth client ID is not configured. Update manifest.json and src/config.js with your Google OAuth client ID."
+      "OAuth client ID is not configured in manifest.json. Update oauth2.client_id and reload the extension."
     );
+  }
+
+  if (
+    configClientId &&
+    !configClientId.includes("YOUR_CLIENT_ID") &&
+    configClientId !== manifestClientId
+  ) {
+    console.warn("[Auth] CONFIG.OAUTH_CLIENT_ID differs from manifest oauth2.client_id.");
   }
 }
 
@@ -60,13 +70,93 @@ export async function getAuthTokenSilent() {
  */
 export async function revokeAuthToken() {
   const token = await getAuthTokenSilent();
-  if (!token) return;
 
-  // Remove from Chrome's internal token cache
-  await new Promise((resolve) => chrome.identity.removeCachedAuthToken({ token }, resolve));
+  if (token) {
+    await new Promise((resolve) => chrome.identity.removeCachedAuthToken({ token }, resolve));
+    fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`).catch(() => {});
+  }
 
-  // Revoke on Google's servers
-  await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
+  if (typeof chrome.identity.clearAllCachedAuthTokens === "function") {
+    await new Promise((resolve) => chrome.identity.clearAllCachedAuthTokens(resolve));
+  }
+
+  // Clear any manually stored override token
+  await clearOverrideToken();
+}
+
+// ─── Override token (from launchWebAuthFlow) ──────────────────────────────────
+// chrome.identity.getAuthToken re-uses the old OAuth grant silently even after
+// clearAllCachedAuthTokens. The only way to guarantee a fresh consent screen
+// with new scopes is launchWebAuthFlow + prompt=consent. Tokens from that flow
+// aren't stored in Chrome's cache, so we manage them here in session storage.
+
+const OVERRIDE_KEY = "oauthOverrideToken";
+
+async function getOverrideToken() {
+  if (!chrome.storage?.session) return null;
+  return new Promise((resolve) => {
+    chrome.storage.session.get(OVERRIDE_KEY, (result) => {
+      const entry = result?.[OVERRIDE_KEY];
+      if (!entry) { resolve(null); return; }
+      if (Date.now() > entry.expiresAt) {
+        chrome.storage.session.remove(OVERRIDE_KEY, () => {});
+        resolve(null);
+        return;
+      }
+      resolve(entry.token);
+    });
+  });
+}
+
+async function setOverrideToken(token) {
+  if (!chrome.storage?.session) return;
+  // OAuth access tokens are valid for 1 hour; store for 55 minutes to be safe
+  await new Promise((resolve) =>
+    chrome.storage.session.set(
+      { [OVERRIDE_KEY]: { token, expiresAt: Date.now() + 55 * 60 * 1000 } },
+      resolve
+    )
+  );
+}
+
+async function clearOverrideToken() {
+  if (!chrome.storage?.session) return;
+  await new Promise((resolve) => chrome.storage.session.remove(OVERRIDE_KEY, resolve));
+}
+
+/**
+ * Force a fresh interactive OAuth grant with all current manifest scopes.
+ * Revokes the existing token at Google's server first, which guarantees that
+ * getAuthToken will show a real consent screen (including any new scopes like
+ * calendar.readonly) instead of silently reusing the old grant.
+ *
+ * @returns {Promise<string>} Fresh access token
+ */
+export async function forceReauth() {
+  // Step 1: Revoke the current token at Google's server so the underlying grant
+  // is invalidated. This forces a real consent screen on the next auth call —
+  // clearAllCachedAuthTokens alone only clears Chrome's local cache; Google
+  // still has the old grant and getAuthToken would silently reuse it.
+  const currentToken = await getAuthTokenSilent().catch(() => null);
+  if (currentToken) {
+    await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${currentToken}`).catch(() => {});
+    await new Promise((resolve) => chrome.identity.removeCachedAuthToken({ token: currentToken }, resolve));
+  }
+
+  // Step 2: Clear ALL locally cached tokens as a belt-and-suspenders measure
+  if (typeof chrome.identity.clearAllCachedAuthTokens === "function") {
+    await new Promise((resolve) => chrome.identity.clearAllCachedAuthTokens(resolve));
+  }
+  await clearOverrideToken();
+
+  // Step 3: Interactive auth — because the old grant was revoked server-side,
+  // Google will show a fresh consent screen with ALL manifest scopes,
+  // including calendar.readonly. No redirect_uri registration needed.
+  const token = await getAuthToken(true);
+
+  // Cache in session storage so authenticatedFetch uses it immediately
+  await setOverrideToken(token);
+  return token;
 }
 
 /**
@@ -95,7 +185,11 @@ export async function authenticatedFetch(url, options = {}) {
     authInteractiveOnRefresh = authRefreshInteractiveDefault,
     ...fetchOptions
   } = options;
-  let token = await getAuthToken(false);
+
+  // Prefer the manually granted override token (from forceReauth / launchWebAuthFlow)
+  // because it carries all current manifest scopes including newly added ones.
+  const override = await getOverrideToken();
+  let token = override || await getAuthToken(false);
 
   const makeRequest = (t) =>
     fetch(url, {
@@ -108,8 +202,9 @@ export async function authenticatedFetch(url, options = {}) {
 
   let response = await makeRequest(token);
 
-  // If 401, remove cached token and retry once with a fresh one
+  // If 401, clear tokens and retry once with a fresh one
   if (response.status === 401) {
+    await clearOverrideToken();
     await new Promise((resolve) =>
       chrome.identity.removeCachedAuthToken({ token }, resolve)
     );

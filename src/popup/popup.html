@@ -19,7 +19,7 @@
     </div>
   </section>
 
-  <div class="app" id="appShell">
+  <div class="app" id="appShell" hidden>
     <header class="header">
       <div class="header-brand">
         <img src="../../icons/fynd-logo-white.svg" alt="logo" class="logo" />
@@ -106,6 +106,101 @@
       <p class="progress-label" id="progressLabel">Initializing...</p>
     </div>
 
+    <details class="meetings-panel" id="meetingsPanel">
+      <summary class="settings-toggle">
+        Today's Meetings
+        <span class="meeting-count-badge" id="meetingCountBadge" hidden></span>
+      </summary>
+      <div class="settings-body meetings-body">
+        <div class="meetings-note" id="meetingsNote" hidden>
+          Enable <b>Calendar Integration</b> in Configuration to see today's meetings.
+        </div>
+        <ul class="meeting-list" id="meetingList">
+          <li class="intel-empty">Loading meetings…</li>
+        </ul>
+        <div class="calendar-auth-guide" id="calendarAuthGuide" hidden>
+          <p class="cal-guide-title">Calendar permission not granted yet</p>
+          <ol class="cal-guide-steps">
+            <li>
+              <a id="btnRevokeGoogleAccess" href="#" class="cal-guide-link">
+                Open Google Permissions →
+              </a>
+              find <b>Jira Gmail Tracker</b> and click <b>Remove Access</b>
+            </li>
+            <li>Come back here and click <b>Re-authorize</b></li>
+          </ol>
+        </div>
+        <div class="meetings-actions">
+          <button id="btnRefreshMeetings" class="btn btn-secondary btn-sm">Refresh</button>
+          <button id="btnReauthCalendar" class="btn btn-primary btn-sm">Re-authorize</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="intelligence-panel" id="intelligencePanel">
+      <summary class="settings-toggle">Intelligence <span class="alert-badge" id="alertBadge" hidden></span></summary>
+      <div class="settings-body">
+
+        <div class="intel-section">
+          <div class="intel-section-header">
+            <span class="intel-section-title">Alerts</span>
+            <button id="btnRunChecks" class="btn btn-secondary btn-xs">Run checks</button>
+          </div>
+          <ul class="intel-list" id="alertList">
+            <li class="intel-empty">No alerts. Run checks to refresh.</li>
+          </ul>
+        </div>
+
+        <div class="intel-section">
+          <div class="intel-section-header">
+            <span class="intel-section-title">Pending Follow-ups</span>
+          </div>
+          <ul class="intel-list" id="followupList">
+            <li class="intel-empty">No pending follow-ups.</li>
+          </ul>
+        </div>
+
+        <div class="intel-section">
+          <div class="intel-section-header">
+            <span class="intel-section-title">Commitments</span>
+          </div>
+          <ul class="intel-list" id="commitmentList">
+            <li class="intel-empty">No tracked commitments.</li>
+          </ul>
+        </div>
+
+      </div>
+    </details>
+
+    <details class="assistant-panel" id="assistantPanel">
+      <summary class="settings-toggle">JMD Platform Assistant <span id="assistantProviderBadge" class="assistant-header-badge" hidden></span></summary>
+      <div class="settings-body assistant-body">
+        <div class="assistant-chips" id="assistantChips">
+          <button class="chip" data-q="List all services">📋 All services</button>
+          <button class="chip" data-q="Who handles OMS?">🛠 OMS DRI</button>
+          <button class="chip" data-q="What changed in v2.1.0?">🚀 v2.1.0 changes</button>
+          <button class="chip" data-q="What is Megatron?">🛒 Megatron</button>
+          <button class="chip" data-q="Who handles payments?">💳 Payments DRI</button>
+          <button class="chip" data-q="What is Stormbreaker?">📦 Stormbreaker</button>
+          <button class="chip" data-q="How to authenticate with platform API?">🌐 Platform API</button>
+          <button class="chip" data-q="How to authenticate with storefront API?">🛍 Storefront API</button>
+        </div>
+        <div class="assistant-messages" id="assistantMessages">
+          <div class="assistant-msg assistant">
+            <div class="assistant-bubble">Hi! I'm the JMD Platform Assistant. Ask about DRI contacts, version features, or paste a Jira ticket ID for analysis.</div>
+          </div>
+        </div>
+        <div class="assistant-input-row">
+          <textarea id="assistantInput" class="assistant-input" placeholder="Ask about DRI, features, or paste a Jira ticket…" rows="1"></textarea>
+          <button id="assistantSendBtn" class="btn btn-primary btn-sm assistant-send">Send</button>
+        </div>
+        <div class="assistant-footer">
+          <button id="assistantClearBtn" class="btn btn-secondary btn-xs">Clear chat</button>
+          <span id="assistantAiNote" class="assistant-ai-note">Answers from local knowledge base · AI enabled when AI summaries are on</span>
+        </div>
+      </div>
+    </details>
+
     <details class="settings-panel" id="settingsPanel">
       <summary class="settings-toggle">Configuration</summary>
       <div class="settings-body">
@@ -179,11 +274,14 @@
         <label class="field">
           <span>AI Provider</span>
           <select id="aiProvider">
-            <option value="basic">Basic (No API key)</option>
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Gemini</option>
+            <option value="openai">ChatGPT (chatgpt.com)</option>
+            <option value="anthropic">Claude (claude.ai)</option>
           </select>
         </label>
+        <div class="field-inline-action">
+          <button id="btnTestAi" class="btn btn-secondary btn-sm">Test connection</button>
+          <p class="field-note ai-test-status" id="aiTestStatus" hidden></p>
+        </div>
         <label class="field">
           <span>AI Summary Mode</span>
           <select id="aiSummaryMode">
@@ -192,28 +290,97 @@
           </select>
         </label>
         <label class="field">
-          <span>OpenAI API Key</span>
-          <input type="password" id="openAiApiKey" placeholder="sk-..." />
-        </label>
-        <label class="field">
-          <span>OpenAI Model</span>
-          <input type="text" id="openAiModel" placeholder="gpt-4.1-mini" />
-        </label>
-        <label class="field">
-          <span>Gemini API Key</span>
-          <input type="password" id="geminiApiKey" placeholder="AIza..." />
-        </label>
-        <label class="field">
-          <span>Gemini Model</span>
-          <input type="text" id="geminiModel" placeholder="gemini-2.0-flash" />
-        </label>
-        <label class="field">
           <span>Consolidated AI Sheet Name</span>
           <input type="text" id="consolidatedSheetName" placeholder="Ticket Insights" />
         </label>
         <p class="field-help">
-          When enabled, each synced ticket gets a summary column and each sync appends a rollup report into the consolidated sheet. Basic mode uses local rule-based summarization and needs no API key.
+          Uses your existing browser session — no API keys needed.<br>
+          Sign in to <b>chatgpt.com</b> or <b>claude.ai</b> in Chrome, then click <b>Test connection</b> to verify.
         </p>
+
+        <p class="field-group-label">Slack Integration</p>
+        <div class="field-help slack-how-to">
+          <strong>How to connect Slack:</strong>
+          <ol class="how-to-steps">
+            <li>Go to <em>api.slack.com/apps</em> → Create New App → From Scratch</li>
+            <li>Add Bot Token Scopes: <code>channels:history</code>, <code>channels:read</code></li>
+            <li>Install app to workspace → copy the <em>Bot User OAuth Token</em> (xoxb-…)</li>
+            <li>Invite the bot to your channel: <code>/invite @YourAppName</code></li>
+            <li>Find your Channel ID in the Slack URL: ends with <code>/CXXXXXXXX</code></li>
+            <li>Paste the token + channel ID below and save settings</li>
+          </ol>
+          Slack threads mentioning Jira tickets will appear in the Intelligence panel after the next sync.
+        </div>
+        <label class="field field-checkbox">
+          <span>Enable Slack thread scanning</span>
+          <input type="checkbox" id="enableSlackIntegration" />
+        </label>
+        <label class="field">
+          <span>Slack Bot Token</span>
+          <input type="password" id="slackBotToken" placeholder="xoxb-..." autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Slack Channel ID</span>
+          <input type="text" id="slackChannelId" placeholder="C0123ABCD" />
+        </label>
+        <button id="btnTestSlack" class="btn btn-secondary btn-sm">Test Slack connection</button>
+        <p class="field-note slack-status" id="slackStatus" hidden></p>
+
+        <p class="field-group-label">Intelligence Features</p>
+        <label class="field field-checkbox">
+          <span>Enable follow-up tracking</span>
+          <input type="checkbox" id="enableFollowupTracking" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable commitment tracking</span>
+          <input type="checkbox" id="enableCommitmentTracking" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable sentiment tracking</span>
+          <input type="checkbox" id="enableSentimentTracking" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable decision log</span>
+          <input type="checkbox" id="enableDecisionLog" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable calendar integration (pre-call briefs)</span>
+          <input type="checkbox" id="enableCalendarIntegration" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable morning brief email</span>
+          <input type="checkbox" id="morningBriefEnabled" />
+        </label>
+        <label class="field">
+          <span>Morning brief time (24h)</span>
+          <input type="time" id="morningBriefTime" />
+        </label>
+        <label class="field field-checkbox">
+          <span>Enable evening report email</span>
+          <input type="checkbox" id="eveningReportEnabled" />
+        </label>
+        <label class="field">
+          <span>Evening report time (24h)</span>
+          <input type="time" id="eveningReportTime" />
+        </label>
+
+        <p class="field-group-label">JMD Assistant — Atlassian Credentials</p>
+        <p class="field-help">
+          Optional. Add credentials to fetch live Jira ticket data in the assistant.<br>
+          Get your API token at <b>id.atlassian.com → Security → API tokens</b>.
+        </p>
+        <label class="field">
+          <span>Atlassian Domain</span>
+          <input type="text" id="atlassianDomain" placeholder="yourcompany.atlassian.net" />
+        </label>
+        <label class="field">
+          <span>Atlassian Email</span>
+          <input type="email" id="atlassianEmail" placeholder="you@company.com" />
+        </label>
+        <label class="field">
+          <span>Atlassian API Token</span>
+          <input type="password" id="atlassianToken" placeholder="API token from id.atlassian.com" autocomplete="off" />
+        </label>
 
         <div class="settings-actions">
           <button id="btnSaveSettings" class="btn btn-primary btn-sm">Save settings</button>
@@ -225,8 +392,11 @@
 
     <footer class="footer">
       <div class="footer-actions">
-        <span>Jira Gmail Tracker v1.0</span>
-        <button id="btnSignOut" class="btn-icon btn-logout" title="Sign Out">Logout</button>
+        <span class="footer-version">Jira Gmail Tracker v1.0</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button id="btnOpenDashboard" class="btn-dashboard" title="Open full dashboard">⬡ Dashboard</button>
+          <button id="btnSignOut" class="btn-icon btn-logout" title="Sign Out">Logout</button>
+        </div>
       </div>
     </footer>
   </div>

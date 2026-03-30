@@ -173,40 +173,52 @@ const DEFAULT_SETTINGS = {
   enableAiSummaries: CONFIG.ENABLE_AI_SUMMARIES,
   aiProvider: CONFIG.AI_PROVIDER,
   aiSummaryMode: CONFIG.AI_SUMMARY_MODE,
-  openAiApiKey: "",
-  openAiModel: CONFIG.OPENAI_MODEL,
-  geminiApiKey: "",
-  geminiModel: CONFIG.GEMINI_MODEL,
   consolidatedSheetName: CONFIG.CONSOLIDATED_SHEET_NAME,
+
+  // ── Intelligence features ────────────────────────────────────────────────
+  morningBriefEnabled: CONFIG.MORNING_BRIEF_ENABLED,
+  morningBriefHour: CONFIG.MORNING_BRIEF_HOUR,
+  morningBriefMinute: CONFIG.MORNING_BRIEF_MINUTE,
+  eveningReportEnabled: CONFIG.EVENING_REPORT_ENABLED,
+  eveningReportHour: CONFIG.EVENING_REPORT_HOUR,
+  eveningReportMinute: CONFIG.EVENING_REPORT_MINUTE,
+  followupCheckHours: CONFIG.FOLLOWUP_CHECK_HOURS,
+  staleTaskDays: CONFIG.STALE_TASK_DAYS,
+  ghostTaskDays: CONFIG.GHOST_TASK_DAYS,
+  enableFollowupTracking: false,
+  enableCommitmentTracking: false,
+  enableSentimentTracking: false,
+  enableDecisionLog: false,
+  enableCalendarIntegration: false,
+  enableSlackIntegration: CONFIG.SLACK_ENABLED,
+  slackChannelId: CONFIG.SLACK_CHANNEL_ID,
+  slackBotToken: "",
+
+  // ── JMD Assistant ────────────────────────────────────────────────────────
+  atlassianDomain: "",
+  atlassianEmail: "",
+  atlassianToken: "", // stored in session storage
 };
 
 export async function getSettings() {
   const [localResult, sessionResult] = await Promise.all([
     storageGet(KEYS.SETTINGS),
-    storageSessionGet([KEYS.OPENAI_API_KEY, KEYS.GEMINI_API_KEY]),
+    storageSessionGet([KEYS.SLACK_BOT_TOKEN, KEYS.ATLASSIAN_TOKEN]),
   ]);
 
   const localSettings = localResult[KEYS.SETTINGS] || {};
-  const sessionOpenAiKey = sessionResult[KEYS.OPENAI_API_KEY];
-  const sessionGeminiKey = sessionResult[KEYS.GEMINI_API_KEY];
+  const sessionSlackToken = sessionResult[KEYS.SLACK_BOT_TOKEN];
+  const sessionAtlassianToken = sessionResult[KEYS.ATLASSIAN_TOKEN];
   const settings = { ...DEFAULT_SETTINGS, ...localSettings };
 
-  // Backward-compat: if keys exist in local settings from older versions,
-  // surface them now and migrate them into session storage.
-  const migratedOpenAiKey = sessionOpenAiKey || localSettings.openAiApiKey || "";
-  const migratedGeminiKey = sessionGeminiKey || localSettings.geminiApiKey || "";
-  settings.openAiApiKey = migratedOpenAiKey;
-  settings.geminiApiKey = migratedGeminiKey;
+  settings.slackBotToken = sessionSlackToken || localSettings.slackBotToken || "";
+  settings.atlassianToken = sessionAtlassianToken || localSettings.atlassianToken || "";
 
-  if ((!sessionOpenAiKey && localSettings.openAiApiKey) || (!sessionGeminiKey && localSettings.geminiApiKey)) {
-    const { openAiApiKey: _openAiApiKey, geminiApiKey: _geminiApiKey, ...sanitizedLocalSettings } = localSettings;
-    await Promise.all([
-      storageSessionSet({
-        [KEYS.OPENAI_API_KEY]: localSettings.openAiApiKey || "",
-        [KEYS.GEMINI_API_KEY]: localSettings.geminiApiKey || "",
-      }),
-      storageSet({ [KEYS.SETTINGS]: sanitizedLocalSettings }),
-    ]);
+  // Migrate Slack token out of local storage into session storage (if present from older versions)
+  if (!sessionSlackToken && localSettings.slackBotToken) {
+    const { slackBotToken: _s, ...sanitized } = localSettings;
+    await storageSessionSet({ [KEYS.SLACK_BOT_TOKEN]: localSettings.slackBotToken });
+    await storageSet({ [KEYS.SETTINGS]: sanitized });
   }
 
   return settings;
@@ -215,17 +227,13 @@ export async function getSettings() {
 export async function saveSettings(settings) {
   const current = await getSettings();
   const merged = { ...current, ...settings };
-  const {
-    openAiApiKey = "",
-    geminiApiKey = "",
-    ...persistedSettings
-  } = merged;
+  const { slackBotToken = "", atlassianToken = "", ...persistedSettings } = merged;
 
   await Promise.all([
     storageSet({ [KEYS.SETTINGS]: persistedSettings }),
     storageSessionSet({
-      [KEYS.OPENAI_API_KEY]: openAiApiKey,
-      [KEYS.GEMINI_API_KEY]: geminiApiKey,
+      [KEYS.SLACK_BOT_TOKEN]: slackBotToken,
+      [KEYS.ATLASSIAN_TOKEN]: atlassianToken,
     }),
   ]);
 }
